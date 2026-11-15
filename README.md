@@ -1,61 +1,60 @@
 # Kiln
 
-A Rust-native AI coding agent. One binary, any provider, real file edits and shell
-commands inside your repository.
+Kiln is an AI coding agent written in Rust. It runs in your terminal, talks to
+whichever model provider you configure, and edits files and runs commands inside
+your repository.
 
-Status: **v0.1 — working headless coding loop.** The agent reads, searches, edits,
-runs commands, and stops. See [Roadmap](#roadmap) for what is deliberately missing.
+> ## Work in progress
+>
+> This is v0.1 and it is incomplete. Only the headless coding loop is built.
+> There is no TUI, no streaming, no MCP, no sub-agents and no memory yet.
+> The config format and CLI flags can change without notice, and there are
+> rough edges and bugs. Please don't point it at a repository you can't restore
+> from git, and don't run it unattended just yet.
+>
+> If you want something stable today, use Claude Code or OpenCode and come back
+> in a few months.
 
-Measured on Windows 11, release build: 7.1 MB binary, ~30 ms startup for
-`--version`. Numbers, not aspirations.
+## What works right now
 
-## What works today
+The agent can read files, search them, edit them, write new ones, and run shell
+commands, then report back. That loop has been tested end to end against a local
+mock provider, and the unit tests run on every push via GitHub Actions.
 
-- Provider-agnostic runtime: OpenAI-compatible (`/chat/completions`) and native
-  Anthropic (`/v1/messages`).
-- One config entry per provider — no code changes, no rebuild. Point it at
-  OpenAI, DeepSeek, GLM, NVIDIA NIM, OpenRouter, Groq, Ollama, llama.cpp, vLLM or
-  LM Studio.
-- Logical models with fallback: a 429, timeout or 500 moves to the next target.
-  Health decides order for `auto`; nothing else needs babysitting.
-- Tools: `read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `shell`. All
-  confined to the workspace root; `..` and symlink escapes are rejected.
-- Permissions: `ask` / `allow` / `readonly`, plus an unconditional confirmation for
-  destructive commands (`rm -rf /`, `git push --force`, `git reset --hard`, …).
-- Context budgeting: stale tool output shrinks, old turns drop, tool-call/result
-  pairs never split.
-- Sessions on disk (`~/.kiln/sessions/`), saved after every step.
+Everything else in the roadmap below is either a stub in the design docs or not
+written at all.
 
-## Install
+## Building it
 
-Requires Rust 1.75+ (install from <https://rustup.rs>).
+You need Rust 1.75 or newer (<https://rustup.rs>).
 
 ```bash
-git clone <repo> kiln && cd kiln
+git clone https://github.com/Swuarez/kiln-agent
+cd kiln-agent
 cargo install --path crates/cli
 ```
 
-Prebuilt binaries and package-manager support are not published yet; that is a
-release-phase task, not something to pretend exists.
+There are no prebuilt binaries or packages yet, so building from source is the
+only way in.
 
-On Windows the MSVC build needs Visual Studio Build Tools (C++ workload). The
-self-contained GNU toolchain also works: `cargo +stable-x86_64-pc-windows-gnu build`.
+On Windows, the default MSVC toolchain needs the Visual Studio Build Tools with
+the C++ workload installed. If you already have those, plain `cargo build` works.
 
-## Configure
+## Setting it up
 
 ```bash
 kiln config init      # writes ~/.kiln/config.toml
-kiln config path      # shows global, project and session locations
-kiln config show      # merged config, keys redacted
+kiln config path      # where the global, project and session files live
+kiln config show      # merged config, with keys redacted
 ```
 
-Minimal config:
+A config with one cloud provider and one local fallback looks like this:
 
 ```toml
 default_model = "default"
 
 [providers.anthropic]
-protocol = "anthropic"           # or "openai-compatible"
+protocol = "anthropic"
 base_url = "https://api.anthropic.com"
 api_key_env = "ANTHROPIC_API_KEY"
 
@@ -63,7 +62,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 base_url = "http://localhost:11434/v1"
 
 [models.default]
-strategy = "priority"            # priority | round-robin | auto
+strategy = "priority"
 
 [[models.default.targets]]
 provider = "anthropic"
@@ -74,64 +73,91 @@ provider = "ollama"
 model = "qwen2.5-coder:14b"
 ```
 
-Project overrides go in `<repo>/.kiln/config.toml`; only the keys you mention are
-overridden. Unknown keys are rejected so a typo cannot silently do nothing.
+Anything that speaks the OpenAI `/chat/completions` API goes under
+`protocol = "openai-compatible"`, which covers DeepSeek, GLM, NIM, OpenRouter,
+Groq, vLLM, llama.cpp and LM Studio. Anthropic is the only native protocol.
 
-## Use
+You can also drop a `.kiln/config.toml` into a project to override individual
+keys from the global file. Unknown keys are rejected instead of ignored, so a
+typo fails at startup rather than quietly doing nothing.
+
+Model names in the file are not checked against anything, so use the exact IDs
+your account can actually access.
+
+## Using it
 
 ```bash
-kiln                                  # interactive
+kiln                                    # interactive session
 kiln run "fix the failing test in src/parser.rs"
-kiln run --yes "add a --version flag" # approve writes automatically
-kiln models                           # logical models, targets, availability
+kiln run --yes "add a --version flag"   # approve writes automatically
+kiln models                             # show configured models and targets
 kiln sessions list
 kiln sessions show <id>
 ```
 
-Headless runs deny writes and shell unless you pass `--yes`. That default is
-deliberate: an unattended agent should not discover it can edit your repo.
+`kiln run` denies file changes and shell commands unless you pass `--yes`. That
+is on purpose: an agent running without a human nearby should not be able to
+start editing things on its own.
 
-## Routing and health
+## Routing
 
-A logical model is an ordered list of `provider + model` targets.
+A model in the config is a list of one or more `provider + model` pairs. When a
+request fails, Kiln moves down the list. The ordering strategy is per model:
 
-| strategy | behaviour |
-|----------|-----------|
-| `priority` | config order; rate-limited targets move to the back |
-| `round-robin` | rotates, honouring `weight` |
-| `auto` | observed latency and error rate decide |
+- `priority` goes in the order written, but a provider that just returned a
+  rate limit gets pushed to the back.
+- `round-robin` rotates between targets and respects `weight`.
+- `auto` sorts by observed latency and error count.
 
-Every failure updates a local health record: 429s cool a target down (using
-`Retry-After` when given), 5xx backs off briefly, auth failures back off for ten
-minutes. Nothing is persisted between processes yet, so health is per-run.
+Rate limits, server errors and auth failures are tracked per provider and model
+for the lifetime of the process. A 429 sets a cooldown using the `Retry-After`
+header when the provider sends one. This is the part I care most about, since
+free and trial tiers change their limits constantly, and the plan is to lean on
+observed behaviour rather than published quotas.
 
-## Security model
+Health is not saved between runs yet, so every new process starts optimistic.
 
-- API keys come from environment variables (`api_key_env`). Inline keys are
-  accepted only for local servers and are warned about.
-- Keys are never logged, never placed in prompts, and redacted by `config show`.
-- File tools resolve paths through canonicalization and refuse anything outside
-  the workspace.
-- `readonly` mode performs no writes and runs no commands.
-- Dangerous shell patterns require confirmation even in `allow` mode.
+## Permissions
 
-Known limits, stated rather than hidden: path checks are subject to TOCTOU races,
-symlink swaps mid-run are not defended against, and there is no sandbox around
-child processes yet.
+There are three modes, set in the config:
 
-## Roadmap
+- `ask` (default): reads are automatic, writes and shell commands ask first.
+- `allow`: everything runs, except commands that match a destructive pattern.
+- `readonly`: no writes and no shell at all.
 
-| Phase | Content |
-|-------|---------|
-| done | workspace, config, sessions, provider abstraction, OpenAI-compatible + Anthropic, tools, permissions, routing with health, headless CLI |
-| next | TUI (ratatui), streaming responses, `--resume` polish, cost/token reporting |
-| then | MCP client, connector registry, skill loading (Claude Code skill compatibility), declarative plugins |
-| then | sub-agents with per-agent models and permissions, project memory |
-| later | repository indexing (tree-sitter symbols), packaging/installers |
+Destructive patterns (`rm -rf /`, `git push --force`, `git reset --hard`,
+`git clean -fd`, `mkfs`, `diskpart`, piping a download into a shell, and similar)
+always require confirmation, even in `allow` mode. The list is a blocklist of
+command text, not a real sandbox, so it will miss creative ways of doing damage.
 
-Code-executing plugins are intentionally not in v1. In-process plugins would
-either get full trust or a fake sandbox; they need a separate process host and a
-real capability boundary first.
+API keys are read from environment variables named by `api_key_env`. Kiln never
+writes them to config, never logs them and never puts them in a prompt. Inline
+`api_key` is accepted for local servers that demand a dummy value and logs a
+warning.
+
+File access is confined to the workspace by resolving paths and checking them
+against the canonical root, which also catches symlinked directories pointing
+outside. This check is not atomic, so a symlink swapped between the check and the
+open would get through. Child processes are not sandboxed in any way.
+
+## What's missing
+
+Ordered roughly by when I plan to get to it:
+
+1. A TUI, streaming responses, and better session resume.
+2. MCP client, so external tool servers can be attached.
+3. Skill loading, including the Claude Code skill format. I want to be careful
+   here: reading `SKILL.md` files is easy, but I don't want to claim
+   compatibility with plugins that execute code until there is a real process
+   boundary to run them in.
+4. Sub-agents with their own model, permissions and context budget.
+5. Persistent memory, split into project facts and user preferences.
+6. Repository indexing with tree-sitter, for symbol-aware search on large repos.
+7. Packaging: prebuilt binaries, installers, maybe Homebrew and Scoop.
+
+Plugins that run arbitrary code are deliberately out of scope for v0.1. Running
+them in-process would mean either full trust or a sandbox that only looks like
+one, and I'm not shipping the second.
 
 ## Development
 
@@ -141,10 +167,19 @@ cargo clippy --workspace --all-targets
 cargo test --workspace
 ```
 
-All provider and agent tests use scripted in-memory providers: the suite is fast
-and never calls a paid API. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
-the crate layout and design decisions.
+The test suite uses scripted in-memory providers, so it runs fast and never calls
+a paid API. There are unit tests for config merging, the permission table,
+routing and cooldowns, tool behaviour against temp directories, and the agent
+loop. The only slow one shells out and checks output truncation.
+
+Crate layout and the reasoning behind the bigger decisions are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Every config key is documented in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+Contributions and bug reports are welcome, but be aware the architecture is
+still moving. If you want to add a provider, the trait is in
+`crates/provider/src/lib.rs` and the adapter is usually under a hundred lines.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) for the full text.
+Apache-2.0. See [LICENSE](LICENSE).
