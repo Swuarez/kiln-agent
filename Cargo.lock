@@ -665,6 +665,7 @@ dependencies = [
  "clap",
  "kiln-agent",
  "kiln-core",
+ "kiln-mcp",
  "kiln-provider",
  "kiln-router",
  "kiln-tools",
@@ -684,6 +685,20 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "toml",
+ "tracing",
+]
+
+[[package]]
+name = "kiln-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "kiln-core",
+ "kiln-tools",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
  "tracing",
 ]
 

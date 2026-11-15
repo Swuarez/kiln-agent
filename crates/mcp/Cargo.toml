@@ -1,0 +1,17 @@
+[package]
+name = "kiln-mcp"
+description = "MCP (Model Context Protocol) client for Kiln"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kiln-core.workspace = true
+kiln-tools.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

@@ -3,7 +3,7 @@ use std::path::Path;
 
 /// The system prompt is intentionally short and operational. Long persona
 /// prompts cost tokens on every turn and buy very little for coding work.
-pub fn system_prompt(cwd: &Path, mode: Mode, tool_names: &[&str]) -> String {
+pub fn system_prompt(cwd: &Path, mode: Mode, tool_names: &[String]) -> String {
     let shell = if cfg!(windows) {
         "cmd.exe (write portable, POSIX-ish commands; PowerShell syntax will not work)"
     } else {
@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn readonly_mode_is_stated_in_the_prompt() {
-        let prompt = system_prompt(Path::new("."), Mode::Readonly, &["read_file"]);
+        let prompt = system_prompt(Path::new("."), Mode::Readonly, &["read_file".to_string()]);
         assert!(prompt.contains("read-only"));
         assert!(prompt.contains("read_file"));
     }

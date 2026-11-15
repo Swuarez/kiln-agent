@@ -30,8 +30,8 @@ impl Shell {
 impl Tool for Shell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "shell",
-            description: "Run a shell command in the workspace and return its output. Prefer dedicated tools for reading and editing files. Long-running commands need an explicit timeout_secs.",
+            name: "shell".to_string(),
+            description: "Run a shell command in the workspace and return its output. Prefer dedicated tools for reading and editing files. Long-running commands need an explicit timeout_secs.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

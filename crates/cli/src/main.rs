@@ -66,6 +66,11 @@ enum Command {
         #[command(subcommand)]
         action: SessionAction,
     },
+    /// Inspect configured MCP servers and their tools
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -86,6 +91,12 @@ enum SessionAction {
     List,
     Show { id: String },
     Rm { id: String },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Spawn each configured server and list its tools
+    List,
 }
 
 fn main() -> std::process::ExitCode {
@@ -123,6 +134,7 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
         Some(Command::Models) => models_command(&cwd),
         Some(Command::Doctor) => doctor_command(&cwd, runtime),
         Some(Command::Sessions { action }) => sessions_command(action),
+        Some(Command::Mcp { action }) => mcp_command(&cwd, action, runtime),
         Some(Command::Run { task, yes }) => {
             let text = task.join(" ");
             let approver: Box<dyn Approver> = if *yes {
@@ -153,7 +165,7 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
     }
 }
 
-fn build_agent(cwd: &Path, model: Option<&str>) -> Result<(Agent, Vec<String>)> {
+async fn build_agent(cwd: &Path, model: Option<&str>) -> Result<(Agent, Vec<String>)> {
     let config = Config::load(cwd)?;
     if config.providers.is_empty() {
         bail!(
@@ -164,17 +176,23 @@ fn build_agent(cwd: &Path, model: Option<&str>) -> Result<(Agent, Vec<String>)> 
     let model_name = config.model_name(model)?;
     let config = Arc::new(config);
     let registry = Registry::from_config(&config)?;
-    let warnings = registry.warnings().to_vec();
+    let mut warnings = registry.warnings().to_vec();
     if registry.is_empty() {
         bail!("no provider is usable:\n- {}", warnings.join("\n- "));
     }
     let router = Router::new(config.models.clone());
     let ctx = ToolCtx::new(cwd, &config.tools)?;
+    let (mcp_tools, mcp_warnings) = kiln_mcp::discover(&config.mcp.servers).await;
+    warnings.extend(mcp_warnings);
+    let mut tool_registry = ToolRegistry::coding();
+    for tool in mcp_tools {
+        tool_registry = tool_registry.with(tool);
+    }
     let agent = Agent::new(
         config,
         Arc::new(registry),
         Arc::new(router),
-        Arc::new(ToolRegistry::coding()),
+        Arc::new(tool_registry),
         ctx,
         model_name,
     );
@@ -189,7 +207,7 @@ fn one_shot(
     runtime: &tokio::runtime::Runtime,
     verbose: bool,
 ) -> Result<std::process::ExitCode> {
-    let (agent, warnings) = build_agent(cwd, model)?;
+    let (agent, warnings) = runtime.block_on(build_agent(cwd, model))?;
     print_warnings(&warnings);
     let mut session = Session::new(cwd);
     let mut printer = EventPrinter { verbose };
@@ -218,7 +236,7 @@ fn chat(
     runtime: &tokio::runtime::Runtime,
     verbose: bool,
 ) -> Result<std::process::ExitCode> {
-    let (agent, warnings) = build_agent(cwd, model)?;
+    let (agent, warnings) = runtime.block_on(build_agent(cwd, model))?;
     print_warnings(&warnings);
 
     let sessions_dir = paths::sessions_dir();
@@ -472,6 +490,51 @@ fn config_command(action: &ConfigAction) -> Result<std::process::ExitCode> {
         }
     }
     Ok(std::process::ExitCode::SUCCESS)
+}
+
+fn mcp_command(
+    cwd: &Path,
+    action: &McpAction,
+    runtime: &tokio::runtime::Runtime,
+) -> Result<std::process::ExitCode> {
+    match action {
+        McpAction::List => {
+            let config = Config::load(cwd)?;
+            if config.mcp.servers.is_empty() {
+                println!("no MCP servers configured");
+                println!("add one under [mcp.servers.<name>] in your config");
+                return Ok(std::process::ExitCode::SUCCESS);
+            }
+            let (tools, warnings) = runtime.block_on(kiln_mcp::discover(&config.mcp.servers));
+            for w in &warnings {
+                eprintln!("warning: {w}");
+            }
+            // Group discovered tools by server prefix.
+            let mut by_server: std::collections::BTreeMap<String, Vec<String>> =
+                std::collections::BTreeMap::new();
+            for tool in &tools {
+                let name = tool.spec().name;
+                let (server, rest) = name.split_once('_').unwrap_or(("", &name));
+                by_server
+                    .entry(server.to_string())
+                    .or_default()
+                    .push(rest.to_string());
+            }
+            for (server, names) in &by_server {
+                println!("{server}: {} tool(s)", names.len());
+                for n in names {
+                    println!("  {n}");
+                }
+            }
+            // Servers that produced no tools still deserve a line.
+            for name in config.mcp.servers.keys() {
+                if !by_server.contains_key(name) {
+                    println!("{name}: no tools (see warnings above)");
+                }
+            }
+            Ok(std::process::ExitCode::SUCCESS)
+        }
+    }
 }
 
 fn sessions_command(action: &SessionAction) -> Result<std::process::ExitCode> {

@@ -15,8 +15,8 @@ pub struct Grep;
 impl Tool for Grep {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "grep",
-            description: "Search file contents with a regular expression. Respects .gitignore, skips binary and very large files. Returns path:line:text matches.",
+            name: "grep".to_string(),
+            description: "Search file contents with a regular expression. Respects .gitignore, skips binary and very large files. Returns path:line:text matches.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

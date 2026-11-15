@@ -145,6 +145,29 @@ impl Default for AgentConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct McpServerConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default = "default_mcp_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_mcp_timeout() -> u64 {
+    60
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct McpConfig {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub servers: BTreeMap<String, McpServerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolsConfig {
     #[serde(default = "default_shell_timeout")]
     pub shell_timeout_secs: u64,
@@ -192,6 +215,8 @@ pub struct Config {
     pub agent: AgentConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 /// Same shape with everything optional, so a project file only overrides the
@@ -205,6 +230,7 @@ struct RawConfig {
     permissions: Option<Permissions>,
     agent: Option<AgentConfig>,
     tools: Option<ToolsConfig>,
+    mcp: Option<McpConfig>,
 }
 
 impl Config {
@@ -246,6 +272,9 @@ impl Config {
         }
         if let Some(t) = raw.tools {
             self.tools = t;
+        }
+        if let Some(m) = raw.mcp {
+            self.mcp = m;
         }
     }
 

@@ -21,8 +21,8 @@ pub struct ReadFile;
 impl Tool for ReadFile {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "read_file",
-            description: "Read a UTF-8 text file from the workspace. Use offset and limit for large files instead of reading everything.",
+            name: "read_file".to_string(),
+            description: "Read a UTF-8 text file from the workspace. Use offset and limit for large files instead of reading everything.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -95,8 +95,8 @@ pub struct WriteFile;
 impl Tool for WriteFile {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "write_file",
-            description: "Create or overwrite a file with the full given content. For changing part of an existing file prefer edit_file.",
+            name: "write_file".to_string(),
+            description: "Create or overwrite a file with the full given content. For changing part of an existing file prefer edit_file.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -145,8 +145,8 @@ pub struct EditFile;
 impl Tool for EditFile {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "edit_file",
-            description: "Replace an exact string in an existing file. old_string must appear exactly once unless replace_all is true. Read the file first so the text matches byte for byte.",
+            name: "edit_file".to_string(),
+            description: "Replace an exact string in an existing file. old_string must appear exactly once unless replace_all is true. Read the file first so the text matches byte for byte.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -254,8 +254,8 @@ pub struct ListDir;
 impl Tool for ListDir {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "list_dir",
-            description: "List files under a directory, honouring .gitignore and skipping hidden entries. Use it to orient yourself in an unfamiliar repository.",
+            name: "list_dir".to_string(),
+            description: "List files under a directory, honouring .gitignore and skipping hidden entries. Use it to orient yourself in an unfamiliar repository.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

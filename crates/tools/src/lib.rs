@@ -64,8 +64,8 @@ impl ToolOutcome {
 /// A tool's public face: name, description, JSON schema and how risky it is.
 #[derive(Debug, Clone)]
 pub struct ToolSpec {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub description: String,
     pub parameters: Value,
     pub risk: Risk,
 }
@@ -77,7 +77,7 @@ pub trait Tool: Send + Sync {
 }
 
 pub struct ToolRegistry {
-    tools: BTreeMap<&'static str, Arc<dyn Tool>>,
+    tools: BTreeMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -116,8 +116,8 @@ impl ToolRegistry {
         self.tools.values().map(|t| t.spec()).collect()
     }
 
-    pub fn names(&self) -> Vec<&'static str> {
-        self.tools.keys().copied().collect()
+    pub fn names(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
     }
 }
 

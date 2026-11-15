@@ -15,7 +15,7 @@ weeks of evenings, **L** is a month or more.
 | 3 | Streaming + TUI | usable for long interactive sessions | M | planned |
 | 4 | Durability | resume, cost accounting, persisted health | M | planned |
 | 5 | Repo intelligence | symbol search on large repos | L | planned |
-| 6 | MCP | external tool servers | M | planned |
+| 6 | MCP | external tool servers | M | partial |
 | 7 | Skills | Claude Code `SKILL.md` compatibility | S | planned |
 | 8 | Sub-agents | delegation with real isolation | L | planned |
 | 9 | Memory | facts that survive sessions | M | planned |
@@ -112,6 +112,11 @@ plus health state are intact.
 
 **Done when:** a community MCP server (filesystem or git) is usable with the same
 approval flow as native tools.
+
+**Progress:** stdio transport, initialize handshake, tool discovery and tool
+calling are implemented in crates/mcp, wired into the CLI via kiln mcp list,
+and verified end to end against a hand-written JSON-RPC server. HTTP/SSE
+transports and per-server permission policy are still outstanding.
 
 ## 7. Skills — S
 
