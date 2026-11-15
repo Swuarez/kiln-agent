@@ -99,6 +99,8 @@ pub struct Agent {
     pub max_tokens: u32,
     /// Where finished and in-flight sessions are written.
     pub sessions_dir: std::path::PathBuf,
+    /// Skills, commands and memory injected into the system prompt.
+    pub prompt_context: prompt::PromptContext,
 }
 
 impl Agent {
@@ -119,6 +121,7 @@ impl Agent {
             model: model.into(),
             max_tokens: 8192,
             sessions_dir: kiln_core::paths::sessions_dir(),
+            prompt_context: prompt::PromptContext::default(),
         }
     }
 
@@ -127,6 +130,7 @@ impl Agent {
             &self.ctx.root,
             self.config.permissions.mode,
             &self.tools.names(),
+            &self.prompt_context,
         )
     }
 

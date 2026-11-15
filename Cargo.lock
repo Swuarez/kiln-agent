@@ -668,6 +668,7 @@ dependencies = [
  "kiln-mcp",
  "kiln-provider",
  "kiln-router",
+ "kiln-skills",
  "kiln-tools",
  "serde_json",
  "tokio",
@@ -725,6 +726,18 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "kiln-skills"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "kiln-core",
+ "kiln-tools",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 

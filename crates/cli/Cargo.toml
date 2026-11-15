@@ -14,6 +14,7 @@ path = "src/main.rs"
 kiln-agent.workspace = true
 kiln-core.workspace = true
 kiln-mcp.workspace = true
+kiln-skills.workspace = true
 kiln-provider.workspace = true
 kiln-router.workspace = true
 kiln-tools.workspace = true

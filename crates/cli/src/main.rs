@@ -74,6 +74,8 @@ enum Command {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// List discovered skills and slash commands
+    Skills,
 }
 
 #[derive(Subcommand)]
@@ -138,6 +140,7 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
         Some(Command::Doctor) => doctor_command(&cwd, runtime),
         Some(Command::Sessions { action }) => sessions_command(action),
         Some(Command::Mcp { action }) => mcp_command(&cwd, action, runtime),
+        Some(Command::Skills) => skills_command(&cwd),
         Some(Command::Run { task, yes }) => {
             let text = task.join(" ");
             let approver: Box<dyn Approver> = if *yes {
@@ -200,11 +203,21 @@ async fn build_agent(
     let ctx = ToolCtx::new(cwd, &config.tools)?;
     let (mcp_tools, mcp_warnings) = kiln_mcp::discover(&config.mcp.servers).await;
     warnings.extend(mcp_warnings);
+
+    // Skills and commands are read once per process; bodies are loaded on demand.
+    let skills = Arc::new(kiln_skills::discover(&ctx.root));
+    let commands = kiln_skills::commands::discover(&ctx.root);
+
     let mut tool_registry = ToolRegistry::coding();
     for tool in mcp_tools {
         tool_registry = tool_registry.with(tool);
     }
-    let agent = Agent::new(
+    if !skills.is_empty() {
+        tool_registry =
+            tool_registry.with(Arc::new(kiln_skills::tool::UseSkill::new(skills.clone())));
+    }
+
+    let mut agent = Agent::new(
         config,
         Arc::new(registry),
         Arc::new(router),
@@ -212,6 +225,8 @@ async fn build_agent(
         ctx,
         model_name,
     );
+    agent.prompt_context.skills = skills.catalogue();
+    agent.prompt_context.commands = commands.catalogue();
     Ok((agent, warnings))
 }
 
@@ -275,6 +290,7 @@ fn chat(
 
     let approver = PromptApprover;
     let mut printer = EventPrinter { verbose };
+    let commands = kiln_skills::commands::discover(&agent.ctx.root);
     let stdin = std::io::stdin();
     loop {
         eprint!("› ");
@@ -291,12 +307,47 @@ fn chat(
         match input {
             "/exit" | "/quit" => break,
             "/help" => {
-                eprintln!("/exit  quit\n/help  this message\nAnything else is sent to the agent.");
+                eprintln!("/exit  quit\n/help  this message");
+                if !commands.is_empty() {
+                    eprintln!("commands:");
+                    for command in commands.iter() {
+                        eprintln!("  /{}: {}", command.name, command.description);
+                    }
+                }
+                eprintln!("Anything else is sent to the agent.");
                 continue;
             }
             _ => {}
         }
-        if let Err(e) = runtime.block_on(agent.run(&mut session, input, &approver, &mut |event| {
+
+        // A slash command expands to its markdown body before the agent sees it.
+        let expanded;
+        let prompt = if let Some(rest) = input.strip_prefix('/') {
+            let (name, args) = match rest.split_once(char::is_whitespace) {
+                Some((name, args)) => (name, args.trim()),
+                None => (rest, ""),
+            };
+            match commands.get(name) {
+                Some(command) => match command.render(args) {
+                    Ok(body) => {
+                        expanded = body;
+                        expanded.as_str()
+                    }
+                    Err(e) => {
+                        eprintln!("kiln: {e}");
+                        continue;
+                    }
+                },
+                None => {
+                    eprintln!("kiln: unknown command '/{name}'. Try /help.");
+                    continue;
+                }
+            }
+        } else {
+            input
+        };
+
+        if let Err(e) = runtime.block_on(agent.run(&mut session, prompt, &approver, &mut |event| {
             printer.print(event)
         })) {
             eprintln!("kiln: {e}");
@@ -513,6 +564,53 @@ fn config_command(action: &ConfigAction) -> Result<std::process::ExitCode> {
                 paths::project_config_path(&std::env::current_dir()?).display()
             );
             println!("sessions: {}", paths::sessions_dir().display());
+        }
+    }
+    Ok(std::process::ExitCode::SUCCESS)
+}
+
+fn skills_command(cwd: &Path) -> Result<std::process::ExitCode> {
+    let root = cwd
+        .canonicalize()
+        .with_context(|| format!("cannot open {}", cwd.display()))?;
+    let skills = kiln_skills::discover(&root);
+    let commands = kiln_skills::commands::discover(&root);
+
+    if skills.is_empty() {
+        println!("no skills found");
+        println!(
+            "put one at {}/<name>/SKILL.md, or in {}",
+            root.join(".kiln").join("skills").display(),
+            kiln_core::paths::kiln_dir().join("skills").display()
+        );
+    } else {
+        println!("{} skill(s):", skills.len());
+        for skill in skills.iter() {
+            let source = match skill.source {
+                kiln_skills::SkillSource::Project => "project",
+                kiln_skills::SkillSource::Global => "global",
+            };
+            println!("  {:<24} {:<8} {}", skill.name, source, skill.description);
+            // Reported, not enforced. Say so rather than implying support.
+            if !skill.allowed_tools.is_empty() {
+                println!(
+                    "    allowed-tools: {} (not enforced yet)",
+                    skill.allowed_tools.join(", ")
+                );
+            }
+        }
+    }
+
+    if commands.is_empty() {
+        println!("\nno slash commands found");
+        println!(
+            "put one at {}/<name>.md",
+            root.join(".kiln").join("commands").display()
+        );
+    } else {
+        println!("\n{} slash command(s):", commands.len());
+        for command in commands.iter() {
+            println!("  /{:<22} {}", command.name, command.description);
         }
     }
     Ok(std::process::ExitCode::SUCCESS)

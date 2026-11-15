@@ -1,0 +1,17 @@
+[package]
+name = "kiln-skills"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Skill and slash-command discovery for Kiln"
+
+[dependencies]
+kiln-core.workspace = true
+kiln-tools.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

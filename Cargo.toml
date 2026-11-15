@@ -8,6 +8,7 @@ members = [
     "crates/agent",
     "crates/cli",
     "crates/mcp",
+    "crates/skills",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ kiln-router = { path = "crates/router" }
 kiln-tools = { path = "crates/tools" }
 kiln-agent = { path = "crates/agent" }
 kiln-mcp = { path = "crates/mcp" }
+kiln-skills = { path = "crates/skills" }
 
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
