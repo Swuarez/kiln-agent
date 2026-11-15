@@ -10,7 +10,7 @@ weeks of evenings, **L** is a month or more.
 
 | # | Milestone | Theme | Size | Status |
 |---|-----------|-------|------|--------|
-| 1 | Trust the wire | make v0.1 survive real providers | S | next |
+| 1 | Trust the wire | make v0.1 survive real providers | S | partial |
 | 2 | Verify loop | tests, builds and git as first-class tools | M | planned |
 | 3 | Streaming + TUI | usable for long interactive sessions | M | planned |
 | 4 | Durability | resume, cost accounting, persisted health | M | planned |
@@ -38,6 +38,10 @@ weeks of evenings, **L** is a month or more.
 
 **Done when:** a full read → edit → shell → verify task has been run against at
 least two real providers, and the differences are written down.
+
+**Progress:** `kiln doctor` and `crates/provider/tests/live.rs` are in place, plus
+`docs/TESTING.md` with the manual matrix. The live checks themselves are blocked
+on having an API key, so the matrix cells are still empty.
 
 ## 2. Verify loop — M
 

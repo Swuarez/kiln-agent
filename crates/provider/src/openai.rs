@@ -14,6 +14,7 @@ pub struct OpenAiCompat {
     id: String,
     client: reqwest::Client,
     url: String,
+    models_url: String,
     api_key: Option<String>,
     headers: BTreeMap<String, String>,
 }
@@ -27,13 +28,26 @@ impl OpenAiCompat {
             .timeout(Duration::from_secs(cfg.timeout_secs))
             .build()
             .map_err(|e| ProviderError::Request(e.to_string()))?;
+        let base = cfg.base_url.trim_end_matches('/');
         Ok(Self {
             id: id.to_string(),
             client,
-            url: format!("{}/chat/completions", cfg.base_url.trim_end_matches('/')),
+            url: format!("{base}/chat/completions"),
+            models_url: format!("{base}/models"),
             api_key,
             headers: cfg.headers.clone(),
         })
+    }
+
+    fn request(&self, url: &str) -> reqwest::RequestBuilder {
+        let mut builder = self.client.get(url);
+        if let Some(key) = &self.api_key {
+            builder = builder.bearer_auth(key);
+        }
+        for (name, value) in &self.headers {
+            builder = builder.header(name, value);
+        }
+        builder
     }
 }
 
@@ -45,6 +59,35 @@ impl Provider for OpenAiCompat {
 
     fn protocol(&self) -> &'static str {
         "openai-compatible"
+    }
+
+    fn endpoint(&self) -> &str {
+        &self.url
+    }
+
+    async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
+        let resp = self
+            .request(&self.models_url)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Request(e.to_string()))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| ProviderError::Request(e.to_string()))?;
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(ProviderError::Auth(brief(&text)));
+        }
+        if !status.is_success() {
+            return Err(ProviderError::Status {
+                status: status.as_u16(),
+                body: brief(&text),
+            });
+        }
+        let parsed: RawModelList = serde_json::from_str(&text)
+            .map_err(|e| ProviderError::Decode(format!("{e}: {}", brief(&text))))?;
+        Ok(parsed.data.into_iter().map(|m| m.id).collect())
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, ProviderError> {
@@ -168,6 +211,17 @@ fn openai_message(msg: &Message) -> Value {
             ..
         } => json!({"role": "tool", "tool_call_id": tool_call_id, "content": content}),
     }
+}
+
+#[derive(Deserialize)]
+struct RawModelList {
+    #[serde(default)]
+    data: Vec<RawModel>,
+}
+
+#[derive(Deserialize)]
+struct RawModel {
+    id: String,
 }
 
 #[derive(Deserialize)]

@@ -46,6 +46,7 @@ the C++ workload installed. If you already have those, plain `cargo build` works
 kiln config init      # writes ~/.kiln/config.toml
 kiln config path      # where the global, project and session files live
 kiln config show      # merged config, with keys redacted
+kiln doctor           # checks keys, reachability and model ids
 ```
 
 A config with one cloud provider and one local fallback looks like this:

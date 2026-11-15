@@ -2,6 +2,7 @@
 //! vendor is a new implementation, never a change to the loop.
 
 pub mod anthropic;
+pub mod doctor;
 pub mod mock;
 pub mod openai;
 
@@ -52,7 +53,18 @@ pub struct ChatResponse {
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
     fn protocol(&self) -> &'static str;
+    /// URL `chat` posts to. Diagnostics only.
+    fn endpoint(&self) -> &str;
     async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, ProviderError>;
+
+    /// Model ids the provider reports, used by `kiln doctor` to catch typos
+    /// before a task starts. Not every server implements the listing, so the
+    /// default is an error rather than an empty list.
+    async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
+        Err(ProviderError::Request(
+            "this provider does not expose a model list".into(),
+        ))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +95,22 @@ impl ProviderError {
     }
 }
 
+/// Builds one provider from config. Shared by the registry and `kiln doctor`,
+/// so the two can never disagree about why a provider is unavailable.
+pub fn build(
+    id: &str,
+    cfg: &kiln_core::config::ProviderConfig,
+) -> Result<Arc<dyn Provider>, ProviderError> {
+    use kiln_core::config::Protocol;
+    match cfg.protocol {
+        Protocol::OpenAiCompatible => openai::OpenAiCompat::new(id, cfg)
+            .map(|p| Arc::new(p) as Arc<dyn Provider>),
+        Protocol::Anthropic => {
+            anthropic::Anthropic::new(id, cfg).map(|p| Arc::new(p) as Arc<dyn Provider>)
+        }
+    }
+}
+
 /// Every configured provider, keyed by config id. Missing credentials demote a
 /// provider to a warning instead of a hard failure, so fallback chains still work.
 pub struct Registry {
@@ -96,15 +124,7 @@ impl Registry {
         let mut warnings = Vec::new();
 
         for (id, p) in &cfg.providers {
-            let built: Result<Arc<dyn Provider>, ProviderError> = match p.protocol {
-                kiln_core::config::Protocol::OpenAiCompatible => {
-                    openai::OpenAiCompat::new(id, p).map(|p| Arc::new(p) as Arc<dyn Provider>)
-                }
-                kiln_core::config::Protocol::Anthropic => {
-                    anthropic::Anthropic::new(id, p).map(|p| Arc::new(p) as Arc<dyn Provider>)
-                }
-            };
-            match built {
+            match build(id, p) {
                 Ok(provider) => {
                     providers.insert(id.clone(), provider);
                 }

@@ -17,6 +17,7 @@ pub struct Anthropic {
     id: String,
     client: reqwest::Client,
     url: String,
+    models_url: String,
     api_key: String,
     headers: BTreeMap<String, String>,
 }
@@ -35,6 +36,7 @@ impl Anthropic {
             id: id.to_string(),
             client,
             url: endpoint(&cfg.base_url, "/v1/messages"),
+            models_url: endpoint(&cfg.base_url, "/v1/models"),
             api_key,
             headers: cfg.headers.clone(),
         })
@@ -59,6 +61,42 @@ impl Provider for Anthropic {
 
     fn protocol(&self) -> &'static str {
         "anthropic"
+    }
+
+    fn endpoint(&self) -> &str {
+        &self.url
+    }
+
+    async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
+        let mut builder = self
+            .client
+            .get(&self.models_url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION);
+        for (name, value) in &self.headers {
+            builder = builder.header(name, value);
+        }
+        let resp = builder
+            .send()
+            .await
+            .map_err(|e| ProviderError::Request(e.to_string()))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| ProviderError::Request(e.to_string()))?;
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(ProviderError::Auth(brief(&text)));
+        }
+        if !status.is_success() {
+            return Err(ProviderError::Status {
+                status: status.as_u16(),
+                body: brief(&text),
+            });
+        }
+        let parsed: RawModelList = serde_json::from_str(&text)
+            .map_err(|e| ProviderError::Decode(format!("{e}: {}", brief(&text))))?;
+        Ok(parsed.data.into_iter().map(|m| m.id).collect())
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, ProviderError> {
@@ -199,6 +237,17 @@ fn flush_results(out: &mut Vec<Value>, pending: &mut Vec<Value>) {
     if !pending.is_empty() {
         out.push(json!({"role": "user", "content": std::mem::take(pending)}));
     }
+}
+
+#[derive(Deserialize)]
+struct RawModelList {
+    #[serde(default)]
+    data: Vec<RawModel>,
+}
+
+#[derive(Deserialize)]
+struct RawModel {
+    id: String,
 }
 
 #[derive(Deserialize)]

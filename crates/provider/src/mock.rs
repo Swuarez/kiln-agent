@@ -39,6 +39,10 @@ impl Provider for MockProvider {
         "mock"
     }
 
+    fn endpoint(&self) -> &str {
+        "mock://"
+    }
+
     async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, ProviderError> {
         self.requests.lock().expect("lock").push(req);
         let mut turns = self.turns.lock().expect("lock");

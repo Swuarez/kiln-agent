@@ -54,6 +54,8 @@ enum Command {
     },
     /// List logical models and their targets
     Models,
+    /// Check configured providers: keys, reachability, model ids
+    Doctor,
     /// Inspect or create configuration
     Config {
         #[command(subcommand)]
@@ -119,6 +121,7 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
     match &cli.command {
         Some(Command::Config { action }) => config_command(action),
         Some(Command::Models) => models_command(&cwd),
+        Some(Command::Doctor) => doctor_command(&cwd, runtime),
         Some(Command::Sessions { action }) => sessions_command(action),
         Some(Command::Run { task, yes }) => {
             let text = task.join(" ");
@@ -385,6 +388,52 @@ fn models_command(cwd: &Path) -> Result<std::process::ExitCode> {
         eprintln!("warning: {w}");
     }
     Ok(std::process::ExitCode::SUCCESS)
+}
+
+fn doctor_command(cwd: &Path, runtime: &tokio::runtime::Runtime) -> Result<std::process::ExitCode> {
+    let config = Config::load(cwd)?;
+    if config.providers.is_empty() {
+        bail!("no providers configured. Run `kiln config init`.");
+    }
+    let report = runtime.block_on(kiln_provider::doctor::run(&config));
+    for check in &report.checks {
+        println!("{} ({})", check.id, check.protocol);
+        println!("  endpoint  {}", check.endpoint);
+        if check.ready {
+            if let Some(problem) = &check.problem {
+                println!("  status    ok, but: {problem}");
+            } else {
+                println!("  status    ok ({} models, {} ms)", check.model_count, check.latency_ms);
+            }
+            if !check.models.is_empty() {
+                println!("  sample    {}", check.models.join(", "));
+            }
+        } else if let Some(problem) = &check.problem {
+            println!("  status    FAILED: {problem}");
+        }
+        if !check.missing_models.is_empty() {
+            println!(
+                "  warning   model ids not listed by this provider: {}",
+                check.missing_models.join(", ")
+            );
+        }
+        println!();
+    }
+    println!(
+        "{} of {} providers ready; {} of {} logical models have a usable target.",
+        report.usable_providers,
+        report.checks.len(),
+        report.logical_models.saturating_sub(report.broken_logical_models.len()),
+        report.logical_models
+    );
+    for name in &report.broken_logical_models {
+        eprintln!("  broken model: {name}");
+    }
+    if report.usable_providers == 0 {
+        Ok(std::process::ExitCode::FAILURE)
+    } else {
+        Ok(std::process::ExitCode::SUCCESS)
+    }
 }
 
 fn config_command(action: &ConfigAction) -> Result<std::process::ExitCode> {
