@@ -86,9 +86,10 @@ pub struct RunOutcome {
     pub text: String,
     pub steps: usize,
     pub usage: Usage,
+    pub cost_usd: f64,
 }
 
-pub struct Agent {
+ pub struct Agent {
     pub config: Arc<Config>,
     pub providers: Arc<Registry>,
     pub router: Arc<Router>,
@@ -150,14 +151,19 @@ impl Agent {
         session.messages.push(Message::user(task));
 
         let mut usage = Usage::default();
+        let mut cost_usd = 0.0_f64;
         let mut last_text = String::new();
 
         for step in 0..self.config.agent.max_steps {
             let fitted = context::fit(&session.messages, self.config.agent.context_budget_tokens);
             let response = match self.complete(&fitted, &mut *on_event).await {
-                Ok(r) => r,
+                Ok((r, c)) => {
+                    cost_usd += c;
+                    r
+                }
                 Err(e) => {
                     // Persist whatever the user asked for, even when no model answered.
+                    self.router.persist();
                     session.save(&self.sessions_dir)?;
                     return Err(e);
                 }
@@ -175,11 +181,13 @@ impl Agent {
             ));
 
             if response.tool_calls.is_empty() {
+                self.router.persist();
                 session.save(&self.sessions_dir)?;
                 return Ok(RunOutcome {
                     text: response.text,
                     steps: step + 1,
                     usage,
+                    cost_usd,
                 });
             }
 
@@ -189,9 +197,11 @@ impl Agent {
                     .messages
                     .push(Message::tool(call.id.clone(), result.0, result.1));
             }
+            self.router.persist();
             session.save(&self.sessions_dir)?;
         }
 
+        self.router.persist();
         session.save(&self.sessions_dir)?;
         Err(Error::Other(format!(
             "stopped after {} steps without finishing. The session is saved at {}.\nLast model message: {}",
@@ -206,7 +216,7 @@ impl Agent {
         &self,
         messages: &[Message],
         on_event: &mut dyn FnMut(AgentEvent),
-    ) -> Result<ChatResponse> {
+    ) -> Result<(ChatResponse, f64)> {
         let targets = self.router.order(&self.model)?;
         let schemas: Vec<ToolSchema> = self
             .tools
@@ -252,8 +262,14 @@ impl Agent {
             let started = Instant::now();
             match provider.chat(request).await {
                 Ok(response) => {
+                    let cost = target.input_cost_per_1k.unwrap_or(0.0)
+                        * response.usage.input_tokens as f64
+                        / 1000.0
+                        + target.output_cost_per_1k.unwrap_or(0.0)
+                            * response.usage.output_tokens as f64
+                            / 1000.0;
                     self.router.record_success(target, started.elapsed());
-                    return Ok(response);
+                    return Ok((response, cost));
                 }
                 Err(e) => {
                     self.router.record_failure(target, classify(&e));

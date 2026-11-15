@@ -15,14 +15,17 @@ const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(30);
 const MIN_COOLDOWN: Duration = Duration::from_secs(5);
 const MAX_COOLDOWN: Duration = Duration::from_secs(600);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Health {
     pub successes: u32,
     pub failures: u32,
     pub rate_limits: u32,
     /// Exponential moving average of successful round-trip time.
     pub latency_ms: f64,
+    #[serde(skip)]
     pub cooldown_until: Option<Instant>,
+    #[serde(default, rename = "cooldown_until_ms")]
+    pub cooldown_until_ms: Option<u64>,
     pub last_error: Option<String>,
 }
 
@@ -34,6 +37,7 @@ impl Default for Health {
             rate_limits: 0,
             latency_ms: DEFAULT_LATENCY_MS,
             cooldown_until: None,
+            cooldown_until_ms: None,
             last_error: None,
         }
     }
@@ -61,6 +65,7 @@ pub struct Router {
     models: BTreeMap<String, LogicalModel>,
     health: Mutex<HashMap<String, Health>>,
     cursors: Mutex<HashMap<String, usize>>,
+    persist_enabled: bool,
 }
 
 fn key(target: &Target) -> String {
@@ -69,10 +74,61 @@ fn key(target: &Target) -> String {
 
 impl Router {
     pub fn new(models: BTreeMap<String, LogicalModel>) -> Self {
+        Self::with_persistence(models, false)
+    }
+
+    pub fn persistent(models: BTreeMap<String, LogicalModel>) -> Self {
+        Self::with_persistence(models, true)
+    }
+
+    fn with_persistence(models: BTreeMap<String, LogicalModel>, persist: bool) -> Self {
+        let mut health_map = HashMap::new();
+        if persist {
+            if let Some(loaded) = Self::load_health() {
+                for (k, mut h) in loaded {
+                    if let Some(ms) = h.cooldown_until_ms {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        if ms > now {
+                            h.cooldown_until =
+                                Some(Instant::now() + Duration::from_millis(ms - now));
+                        }
+                    }
+                    health_map.insert(k, h);
+                }
+            }
+        }
         Self {
             models,
-            health: Mutex::new(HashMap::new()),
+            health: Mutex::new(health_map),
             cursors: Mutex::new(HashMap::new()),
+            persist_enabled: persist,
+        }
+    }
+
+    fn health_path() -> std::path::PathBuf {
+        kiln_core::paths::kiln_dir().join("health.json")
+    }
+
+    fn load_health() -> Option<HashMap<String, Health>> {
+        let path = Self::health_path();
+        let bytes = std::fs::read(&path).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    pub fn persist(&self) {
+        if !self.persist_enabled {
+            return;
+        }
+        let health = self.health.lock().expect("health lock");
+        let path = Self::health_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(body) = serde_json::to_vec_pretty(&*health) {
+            let _ = std::fs::write(&path, body);
         }
     }
 
@@ -98,11 +154,26 @@ impl Router {
             base + f64::from(failures) * 500.0 + f64::from(limits) * 1500.0
         };
 
-        let mut ordered: Vec<Target> = match model.strategy {
-            Strategy::Priority => model.targets.clone(),
+        let required = &model.required_capabilities;
+        let available_targets: Vec<Target> = if required.is_empty() {
+            model.targets.clone()
+        } else {
+            model
+                .targets
+                .iter()
+                .filter(|t| required.iter().all(|c| t.capabilities.iter().any(|x| x == c)))
+                .cloned()
+                .collect()
+        };
+        let model_for_order = LogicalModel {
+            targets: available_targets,
+            ..model.clone()
+        };
+        let mut ordered: Vec<Target> = match model_for_order.strategy {
+            Strategy::Priority => model_for_order.targets.clone(),
             Strategy::RoundRobin => {
                 let mut expanded: Vec<Target> = Vec::new();
-                for t in &model.targets {
+                for t in &model_for_order.targets {
                     for _ in 0..t.weight.min(100) {
                         expanded.push(t.clone());
                     }
@@ -117,7 +188,7 @@ impl Router {
                 expanded
             }
             Strategy::Auto => {
-                let mut targets = model.targets.clone();
+                let mut targets = model_for_order.targets.clone();
                 targets.sort_by(|a, b| score(a).total_cmp(&score(b)));
                 targets
             }
@@ -140,6 +211,7 @@ impl Router {
         };
         entry.successes += 1;
         entry.cooldown_until = None;
+        entry.cooldown_until_ms = None;
         entry.last_error = None;
     }
 
@@ -164,6 +236,12 @@ impl Router {
         entry.last_error = Some(format!("{failure:?}"));
         if let Some(cd) = cooldown {
             entry.cooldown_until = Some(Instant::now() + cd);
+            entry.cooldown_until_ms = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64 + cd.as_millis() as u64)
+                    .unwrap_or(0),
+            );
         }
     }
 
@@ -199,12 +277,15 @@ mod tests {
             provider: provider.into(),
             model: model.into(),
             weight: 1,
+            capabilities: Vec::new(),
+            input_cost_per_1k: None,
+            output_cost_per_1k: None,
         }
     }
 
     fn router(strategy: Strategy, targets: Vec<Target>) -> Router {
         let mut models = BTreeMap::new();
-        models.insert("m".to_string(), LogicalModel { strategy, targets });
+        models.insert("m".to_string(), LogicalModel { strategy, targets, required_capabilities: Vec::new() });
         Router::new(models)
     }
 

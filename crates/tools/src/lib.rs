@@ -10,8 +10,10 @@ pub mod search;
 pub mod shell;
 pub mod testrun;
 
+pub use kiln_core::Risk;
+
 use async_trait::async_trait;
-use kiln_core::{config::ToolsConfig, Result, Risk};
+use kiln_core::{config::ToolsConfig, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

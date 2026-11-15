@@ -79,6 +79,14 @@ pub struct Target {
     /// Round-robin share. Ignored by other strategies.
     #[serde(default = "default_weight")]
     pub weight: u32,
+    /// Capability tags this target can satisfy (e.g. coding, vision, reasoning).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    /// USD per 1k input tokens, for cost reporting. Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_cost_per_1k: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_cost_per_1k: Option<f64>,
 }
 
 fn default_weight() -> u32 {
@@ -93,6 +101,9 @@ pub struct LogicalModel {
     #[serde(default)]
     pub strategy: Strategy,
     pub targets: Vec<Target>,
+    /// Capabilities every target must advertise. Filters targets in all strategies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,11 +157,19 @@ impl Default for AgentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerConfig {
+    /// Stdio transport: command to spawn.
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// HTTP/SSE transport: base URL. If set, stdio command is ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Trust level: ask (default), allow, readonly. Maps to tool risk.
+    #[serde(default)]
+    pub trust: crate::permission::Mode,
     #[serde(default = "default_mcp_timeout")]
     pub timeout_secs: u64,
 }
@@ -217,6 +236,9 @@ pub struct Config {
     pub tools: ToolsConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    /// Map from task label to logical model name, e.g. "refactor" -> "strong".
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub task_models: BTreeMap<String, String>,
 }
 
 /// Same shape with everything optional, so a project file only overrides the
@@ -231,6 +253,7 @@ struct RawConfig {
     agent: Option<AgentConfig>,
     tools: Option<ToolsConfig>,
     mcp: Option<McpConfig>,
+    task_models: Option<BTreeMap<String, String>>,
 }
 
 impl Config {
@@ -275,6 +298,9 @@ impl Config {
         }
         if let Some(m) = raw.mcp {
             self.mcp = m;
+        }
+        if let Some(t) = raw.task_models {
+            self.task_models.extend(t);
         }
     }
 
@@ -336,7 +362,7 @@ impl Config {
     }
 
     /// The logical model to use for a turn.
-    pub fn model_name(&self, requested: Option<&str>) -> Result<String> {
+    pub fn model_name(&self, requested: Option<&str>, task: Option<&str>) -> Result<String> {
         if let Some(name) = requested {
             if !self.models.contains_key(name) {
                 return Err(Error::config(format!(
@@ -345,6 +371,13 @@ impl Config {
                 )));
             }
             return Ok(name.to_string());
+        }
+        if let Some(task) = task {
+            if let Some(name) = self.task_models.get(task) {
+                if self.models.contains_key(name) {
+                    return Ok(name.clone());
+                }
+            }
         }
         if let Some(name) = &self.default_model {
             return Ok(name.clone());
@@ -481,7 +514,11 @@ mod tests {
                     provider: "p".into(),
                     model: "m".into(),
                     weight: 1,
+                    capabilities: Vec::new(),
+                    input_cost_per_1k: None,
+                    output_cost_per_1k: None,
                 }],
+                required_capabilities: Vec::new(),
             },
         );
         cfg.default_model = Some("default".into());
@@ -494,7 +531,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.apply(raw);
         cfg.validate().expect("template passes validation");
-        assert_eq!(cfg.model_name(None).unwrap(), "default");
+        assert_eq!(cfg.model_name(None, None).unwrap(), "default");
     }
 
     #[test]

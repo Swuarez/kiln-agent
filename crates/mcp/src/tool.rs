@@ -10,6 +10,7 @@ pub struct McpTool {
     pub description: String,
     pub schema: Value,
     pub client: McpClient,
+    pub risk: Risk,
 }
 
 #[async_trait]
@@ -19,7 +20,7 @@ impl Tool for McpTool {
             name: format!("{}_{}", self.server, self.tool_name),
             description: self.description.clone(),
             parameters: self.schema.clone(),
-            risk: Risk::Write,
+            risk: self.risk,
         }
     }
 

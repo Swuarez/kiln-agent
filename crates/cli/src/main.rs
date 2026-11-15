@@ -28,6 +28,9 @@ struct Cli {
     /// Logical model to use (see `kiln models`)
     #[arg(long, short = 'm', global = true)]
     model: Option<String>,
+    /// Task label for model selection (see [task_models] in config)
+    #[arg(long, global = true)]
+    task: Option<String>,
     /// Print routing and tool details to stderr
     #[arg(long, global = true)]
     verbose: bool,
@@ -148,6 +151,7 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
             one_shot(
                 &cwd,
                 cli.model.as_deref(),
+                cli.task.as_deref(),
                 &text,
                 approver.as_ref(),
                 runtime,
@@ -157,15 +161,23 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
         Some(Command::Chat { session }) => chat(
             &cwd,
             cli.model.as_deref(),
+            cli.task.as_deref(),
             session.as_deref(),
             runtime,
             cli.verbose,
         ),
-        None => chat(&cwd, cli.model.as_deref(), None, runtime, cli.verbose),
+        None => chat(
+            &cwd,
+            cli.model.as_deref(),
+            cli.task.as_deref(),
+            None,
+            runtime,
+            cli.verbose,
+        ),
     }
 }
 
-async fn build_agent(cwd: &Path, model: Option<&str>) -> Result<(Agent, Vec<String>)> {
+async fn build_agent(cwd: &Path, model: Option<&str>, task: Option<&str>) -> Result<(Agent, Vec<String>)> {
     let config = Config::load(cwd)?;
     if config.providers.is_empty() {
         bail!(
@@ -173,14 +185,14 @@ async fn build_agent(cwd: &Path, model: Option<&str>) -> Result<(Agent, Vec<Stri
             paths::global_config_path().display()
         );
     }
-    let model_name = config.model_name(model)?;
+    let model_name = config.model_name(model, task)?;
     let config = Arc::new(config);
     let registry = Registry::from_config(&config)?;
     let mut warnings = registry.warnings().to_vec();
     if registry.is_empty() {
         bail!("no provider is usable:\n- {}", warnings.join("\n- "));
     }
-    let router = Router::new(config.models.clone());
+    let router = Router::persistent(config.models.clone());
     let ctx = ToolCtx::new(cwd, &config.tools)?;
     let (mcp_tools, mcp_warnings) = kiln_mcp::discover(&config.mcp.servers).await;
     warnings.extend(mcp_warnings);
@@ -202,22 +214,23 @@ async fn build_agent(cwd: &Path, model: Option<&str>) -> Result<(Agent, Vec<Stri
 fn one_shot(
     cwd: &Path,
     model: Option<&str>,
-    task: &str,
+    task_label: Option<&str>,
+    text: &str,
     approver: &dyn Approver,
     runtime: &tokio::runtime::Runtime,
     verbose: bool,
 ) -> Result<std::process::ExitCode> {
-    let (agent, warnings) = runtime.block_on(build_agent(cwd, model))?;
+    let (agent, warnings) = runtime.block_on(build_agent(cwd, model, task_label))?;
     print_warnings(&warnings);
     let mut session = Session::new(cwd);
     let mut printer = EventPrinter { verbose };
 
-    match runtime.block_on(agent.run(&mut session, task, approver, &mut |e| printer.print(e))) {
+    match runtime.block_on(agent.run(&mut session, text, approver, &mut |e| printer.print(e))) {
         Ok(outcome) => {
             if verbose {
                 eprintln!(
-                    "[kiln] {} steps, {} input tokens, {} output tokens",
-                    outcome.steps, outcome.usage.input_tokens, outcome.usage.output_tokens
+                    "[kiln] {} steps, {} input tokens, {} output tokens, ${:.4}",
+                    outcome.steps, outcome.usage.input_tokens, outcome.usage.output_tokens, outcome.cost_usd
                 );
             }
             Ok(std::process::ExitCode::SUCCESS)
@@ -232,11 +245,12 @@ fn one_shot(
 fn chat(
     cwd: &Path,
     model: Option<&str>,
+    task_label: Option<&str>,
     resume: Option<&str>,
     runtime: &tokio::runtime::Runtime,
     verbose: bool,
 ) -> Result<std::process::ExitCode> {
-    let (agent, warnings) = runtime.block_on(build_agent(cwd, model))?;
+    let (agent, warnings) = runtime.block_on(build_agent(cwd, model, task_label))?;
     print_warnings(&warnings);
 
     let sessions_dir = paths::sessions_dir();
@@ -382,7 +396,7 @@ fn models_command(cwd: &Path) -> Result<std::process::ExitCode> {
     }
     let registry = Registry::from_config(&config)?;
     let warnings = registry.warnings();
-    let default = config.model_name(None).ok();
+    let default = config.model_name(None, None).ok();
     for (name, model) in &config.models {
         let marker = if Some(name) == default.as_ref() {
             " (default)"

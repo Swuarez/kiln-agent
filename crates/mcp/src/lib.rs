@@ -9,6 +9,7 @@ pub use client::{McpClient, McpError, McpToolSpec};
 pub use tool::McpTool;
 
 use kiln_core::config::McpServerConfig;
+use kiln_tools::Risk;
 use kiln_tools::Tool;
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ pub async fn discover(
     let mut tools: Vec<Arc<dyn Tool>> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     for (name, cfg) in servers {
-        match McpClient::spawn(cfg).await {
+        match McpClient::connect(cfg).await {
             Ok(client) => {
                 if let Err(e) = client.initialize().await {
                     warnings.push(format!("mcp '{name}': initialize failed: {e}"));
@@ -30,12 +31,18 @@ pub async fn discover(
                 match client.list_tools().await {
                     Ok(specs) => {
                         for spec in specs {
+                            let risk = match cfg.trust {
+                                kiln_core::permission::Mode::Allow => Risk::Read,
+                                kiln_core::permission::Mode::Readonly => Risk::Read,
+                                kiln_core::permission::Mode::Ask => Risk::Write,
+                            };
                             tools.push(Arc::new(McpTool {
                                 server: name.clone(),
                                 tool_name: spec.name,
                                 description: spec.description,
                                 schema: spec.input_schema,
                                 client: client.clone(),
+                                risk,
                             }));
                         }
                     }

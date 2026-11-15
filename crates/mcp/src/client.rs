@@ -20,13 +20,17 @@ pub enum McpError {
     Timeout,
     #[error("could not decode: {0}")]
     Decode(String),
+    #[error("http: {0}")]
+    Http(String),
 }
 
-pub struct McpClient {
-    inner: Arc<Inner>,
+#[derive(Clone)]
+pub enum McpClient {
+    Stdio(Arc<StdioInner>),
+    Http(Arc<HttpInner>),
 }
 
-struct Inner {
+pub struct StdioInner {
     writer: Mutex<tokio::process::ChildStdin>,
     pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Value>>>>,
     next_id: AtomicU64,
@@ -34,8 +38,32 @@ struct Inner {
     _child: Mutex<Child>,
 }
 
+pub struct HttpInner {
+    client: reqwest::Client,
+    url: String,
+    session_id: Mutex<Option<String>>,
+    next_id: AtomicU64,
+}
+
 impl McpClient {
-    pub async fn spawn(cfg: &kiln_core::config::McpServerConfig) -> Result<Self, McpError> {
+    pub async fn connect(cfg: &kiln_core::config::McpServerConfig) -> Result<Self, McpError> {
+        if let Some(url) = &cfg.url {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(cfg.timeout_secs))
+                .build()
+                .map_err(|e| McpError::Http(e.to_string()))?;
+            Ok(McpClient::Http(Arc::new(HttpInner {
+                client,
+                url: url.clone(),
+                session_id: Mutex::new(None),
+                next_id: AtomicU64::new(1),
+            })))
+        } else {
+            Self::spawn_stdio(cfg).await
+        }
+    }
+
+    async fn spawn_stdio(cfg: &kiln_core::config::McpServerConfig) -> Result<Self, McpError> {
         let mut cmd = Command::new(&cfg.command);
         cmd.args(&cfg.args);
         for (k, v) in &cfg.env {
@@ -70,15 +98,13 @@ impl McpClient {
             }
         });
 
-        Ok(Self {
-            inner: Arc::new(Inner {
-                writer: Mutex::new(stdin),
-                pending,
-                next_id: AtomicU64::new(1),
-                _reader: reader,
-                _child: Mutex::new(child),
-            }),
-        })
+        Ok(McpClient::Stdio(Arc::new(StdioInner {
+            writer: Mutex::new(stdin),
+            pending,
+            next_id: AtomicU64::new(1),
+            _reader: reader,
+            _child: Mutex::new(child),
+        })))
     }
 
     pub async fn initialize(&self) -> Result<(), McpError> {
@@ -92,11 +118,23 @@ impl McpClient {
                 }),
             )
             .await?;
+        // Notification; fire-and-forget for both transports.
         let notif = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
-        let mut w = self.inner.writer.lock().await;
-        w.write_all(notif.to_string().as_bytes()).await?;
-        w.write_all(b"\n").await?;
-        w.flush().await?;
+        match self {
+            McpClient::Stdio(s) => {
+                let mut w = s.writer.lock().await;
+                w.write_all(notif.to_string().as_bytes()).await?;
+                w.write_all(b"\n").await?;
+                w.flush().await?;
+            }
+            McpClient::Http(h) => {
+                let mut req = h.client.post(&h.url).json(&notif);
+                if let Some(sid) = h.session_id.lock().await.clone() {
+                    req = req.header("Mcp-Session-Id", sid);
+                }
+                let _ = req.send().await;
+            }
+        }
         Ok(())
     }
 
@@ -155,36 +193,68 @@ impl McpClient {
     }
 
     async fn request(&self, method: &str, params: Value) -> Result<Value, McpError> {
-        let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = oneshot::channel();
-        self.inner.pending.lock().await.insert(id, tx);
-        let req = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        {
-            let mut w = self.inner.writer.lock().await;
-            w.write_all(req.to_string().as_bytes()).await?;
-            w.write_all(b"\n").await?;
-            w.flush().await?;
+        let (id, maybe_rx) = match self {
+            McpClient::Stdio(s) => {
+                let id = s.next_id.fetch_add(1, Ordering::SeqCst);
+                let (tx, rx) = oneshot::channel();
+                s.pending.lock().await.insert(id, tx);
+                (id, Some(rx))
+            }
+            McpClient::Http(h) => {
+                let id = h.next_id.fetch_add(1, Ordering::SeqCst);
+                (id, None)
+            }
+        };
+
+        // Build the JSON-RPC body.
+        let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+
+        match self {
+            McpClient::Stdio(s) => {
+                {
+                    let mut w = s.writer.lock().await;
+                    w.write_all(body.to_string().as_bytes()).await?;
+                    w.write_all(b"\n").await?;
+                    w.flush().await?;
+                }
+                let rx = maybe_rx.unwrap();
+                let resp = tokio::time::timeout(Duration::from_secs(30), rx)
+                    .await
+                    .map_err(|_| McpError::Timeout)?
+                    .map_err(|_| McpError::ProcessGone)?;
+                if let Some(err) = resp.get("error") {
+                    return Err(McpError::Rpc(err.to_string()));
+                }
+                Ok(resp.get("result").cloned().unwrap_or(Value::Null))
+            }
+            McpClient::Http(h) => {
+                let mut req = h.client.post(&h.url).json(&body);
+                if let Some(sid) = h.session_id.lock().await.clone() {
+                    req = req.header("Mcp-Session-Id", sid);
+                }
+                let resp = req.send().await.map_err(|e| McpError::Http(e.to_string()))?;
+                if let Some(sid) = resp.headers().get("mcp-session-id") {
+                    if let Ok(s) = sid.to_str() {
+                        *h.session_id.lock().await = Some(s.to_string());
+                    }
+                }
+                let status = resp.status();
+                let text = resp.text().await.map_err(|e| McpError::Http(e.to_string()))?;
+                if !status.is_success() {
+                    return Err(McpError::Http(format!("{status}: {text}")));
+                }
+                let value: Value =
+                    serde_json::from_str(&text).map_err(|e| McpError::Decode(format!("{e}: {text}")))?;
+                if let Some(err) = value.get("error") {
+                    return Err(McpError::Rpc(err.to_string()));
+                }
+                Ok(value.get("result").cloned().unwrap_or(Value::Null))
+            }
         }
-        let resp = tokio::time::timeout(Duration::from_secs(30), rx)
-            .await
-            .map_err(|_| McpError::Timeout)?
-            .map_err(|_| McpError::ProcessGone)?;
-        if let Some(err) = resp.get("error") {
-            return Err(McpError::Rpc(err.to_string()));
-        }
-        Ok(resp.get("result").cloned().unwrap_or(Value::Null))
     }
 }
 
-impl Clone for McpClient {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct McpToolSpec {
     pub name: String,
     pub description: String,

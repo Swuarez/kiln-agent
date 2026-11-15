@@ -25,6 +25,9 @@ fn target(provider: &str) -> Target {
         provider: provider.into(),
         model: "m".into(),
         weight: 1,
+        capabilities: Vec::new(),
+        input_cost_per_1k: None,
+        output_cost_per_1k: None,
     }
 }
 
@@ -48,6 +51,7 @@ fn config_with(mode: Mode, targets: Vec<Target>, max_steps: usize) -> Arc<Config
         LogicalModel {
             strategy: Strategy::Priority,
             targets,
+            required_capabilities: Vec::new(),
         },
     );
     cfg.default_model = Some("default".into());
