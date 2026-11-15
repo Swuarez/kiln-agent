@@ -132,6 +132,13 @@ and verified end to end against a hand-written JSON-RPC server. Per-server trust
 **Done when:** an existing Claude Code skill works unmodified, and the limits are
 documented rather than assumed.
 
+**Progress:** done. `crates/skills` discovers project and global skills, keeps a
+name+description catalogue in the prompt, and loads bodies through a `use_skill`
+tool. Slash commands expand from `.kiln/commands/*.md` with `$ARGUMENTS` and
+`$1..$9`. `kiln skills` lists what was found. Format support and every gap are
+written down in `docs/SKILLS.md`; notably `allowed-tools` is parsed and shown but
+not enforced.
+
 ## 8. Sub-agents — L
 
 **Goal:** a big investigation should not consume the parent's context.
@@ -144,6 +151,14 @@ documented rather than assumed.
 
 **Done when:** a repo-wide research task splits into parallel explorers whose
 findings come back under a token cap.
+
+**Progress:** done. `crates/agent/src/subagent.rs` provides a `delegate` tool that
+snapshots the parent's providers, router and tools, then runs a child with its own
+session, model and step budget. Children are read-only by default, never receive
+`delegate` themselves, and never inherit the skill catalogue. Summaries are clipped
+to `agent.subagents.max_summary_chars`. `run_parallel` respects the concurrency cap.
+Verified end to end with a mock provider: the child request carried no `delegate`
+tool and the parent received the summary. Not yet exercised against a live model.
 
 ## 9. Memory — M
 
