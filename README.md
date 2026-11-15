@@ -140,24 +140,19 @@ against the canonical root, which also catches symlinked directories pointing
 outside. This check is not atomic, so a symlink swapped between the check and the
 open would get through. Child processes are not sandboxed in any way.
 
-## What's missing
+## Where it's going
 
-Ordered roughly by when I plan to get to it:
+The first job is proving the adapters against real providers, since so far they
+have only talked to a mock server. After that, in order: test and git tools so
+the agent can check its own work, streaming plus a TUI, session durability,
+repository indexing, MCP, skills, sub-agents, memory, and packaging.
 
-1. A TUI, streaming responses, and better session resume.
-2. MCP client, so external tool servers can be attached.
-3. Skill loading, including the Claude Code skill format. I want to be careful
-   here: reading `SKILL.md` files is easy, but I don't want to claim
-   compatibility with plugins that execute code until there is a real process
-   boundary to run them in.
-4. Sub-agents with their own model, permissions and context budget.
-5. Persistent memory, split into project facts and user preferences.
-6. Repository indexing with tree-sitter, for symbol-aware search on large repos.
-7. Packaging: prebuilt binaries, installers, maybe Homebrew and Scoop.
+Each step has a concrete definition of done, in
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
-Plugins that run arbitrary code are deliberately out of scope for v0.1. Running
-them in-process would mean either full trust or a sandbox that only looks like
-one, and I'm not shipping the second.
+Plugins that execute code stay out until there is a separate process to run them
+in. In-process plugins would mean either full trust or a sandbox that only looks
+like one.
 
 ## Development
 
