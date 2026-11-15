@@ -113,10 +113,10 @@ plus health state are intact.
 **Done when:** a community MCP server (filesystem or git) is usable with the same
 approval flow as native tools.
 
-**Progress:** stdio transport, initialize handshake, tool discovery and tool
-calling are implemented in crates/mcp, wired into the CLI via kiln mcp list,
-and verified end to end against a hand-written JSON-RPC server. HTTP/SSE
-transports and per-server permission policy are still outstanding.
+**Progress:** stdio and HTTP transports, initialize handshake, tool discovery
+and tool calling are implemented in crates/mcp, wired into the CLI via kiln mcp list,
+and verified end to end against a hand-written JSON-RPC server. Per-server trust
+(allow/ask) maps to tool risk. SSE streaming responses and connectors remain.
 
 ## 7. Skills — S
 
