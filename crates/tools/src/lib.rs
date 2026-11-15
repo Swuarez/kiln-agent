@@ -5,8 +5,10 @@
 //! loop needs to know where a tool came from.
 
 pub mod fs;
+pub mod git;
 pub mod search;
 pub mod shell;
+pub mod testrun;
 
 use async_trait::async_trait;
 use kiln_core::{config::ToolsConfig, Result, Risk};
@@ -99,6 +101,12 @@ impl ToolRegistry {
             Arc::new(fs::ListDir),
             Arc::new(search::Grep),
             Arc::new(shell::Shell),
+            Arc::new(git::GitStatus),
+            Arc::new(git::GitDiff),
+            Arc::new(git::GitLog),
+            Arc::new(git::GitCommit),
+            Arc::new(testrun::RunTests),
+            Arc::new(testrun::Build),
         ])
     }
 
