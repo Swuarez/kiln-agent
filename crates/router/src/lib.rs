@@ -161,7 +161,11 @@ impl Router {
             model
                 .targets
                 .iter()
-                .filter(|t| required.iter().all(|c| t.capabilities.iter().any(|x| x == c)))
+                .filter(|t| {
+                    required
+                        .iter()
+                        .all(|c| t.capabilities.iter().any(|x| x == c))
+                })
                 .cloned()
                 .collect()
         };
@@ -285,7 +289,14 @@ mod tests {
 
     fn router(strategy: Strategy, targets: Vec<Target>) -> Router {
         let mut models = BTreeMap::new();
-        models.insert("m".to_string(), LogicalModel { strategy, targets, required_capabilities: Vec::new() });
+        models.insert(
+            "m".to_string(),
+            LogicalModel {
+                strategy,
+                targets,
+                required_capabilities: Vec::new(),
+            },
+        );
         Router::new(models)
     }
 

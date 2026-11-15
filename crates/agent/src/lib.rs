@@ -89,7 +89,7 @@ pub struct RunOutcome {
     pub cost_usd: f64,
 }
 
- pub struct Agent {
+pub struct Agent {
     pub config: Arc<Config>,
     pub providers: Arc<Registry>,
     pub router: Arc<Router>,

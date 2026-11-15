@@ -232,19 +232,25 @@ impl McpClient {
                 if let Some(sid) = h.session_id.lock().await.clone() {
                     req = req.header("Mcp-Session-Id", sid);
                 }
-                let resp = req.send().await.map_err(|e| McpError::Http(e.to_string()))?;
+                let resp = req
+                    .send()
+                    .await
+                    .map_err(|e| McpError::Http(e.to_string()))?;
                 if let Some(sid) = resp.headers().get("mcp-session-id") {
                     if let Ok(s) = sid.to_str() {
                         *h.session_id.lock().await = Some(s.to_string());
                     }
                 }
                 let status = resp.status();
-                let text = resp.text().await.map_err(|e| McpError::Http(e.to_string()))?;
+                let text = resp
+                    .text()
+                    .await
+                    .map_err(|e| McpError::Http(e.to_string()))?;
                 if !status.is_success() {
                     return Err(McpError::Http(format!("{status}: {text}")));
                 }
-                let value: Value =
-                    serde_json::from_str(&text).map_err(|e| McpError::Decode(format!("{e}: {text}")))?;
+                let value: Value = serde_json::from_str(&text)
+                    .map_err(|e| McpError::Decode(format!("{e}: {text}")))?;
                 if let Some(err) = value.get("error") {
                     return Err(McpError::Rpc(err.to_string()));
                 }

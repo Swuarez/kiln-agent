@@ -33,10 +33,18 @@ fn detect(dir: &std::path::Path) -> Option<Project> {
     None
 }
 
-async fn run_cmd(ctx: &ToolCtx, dir: &std::path::Path, program: &str, args: &[&str]) -> ToolOutcome {
+async fn run_cmd(
+    ctx: &ToolCtx,
+    dir: &std::path::Path,
+    program: &str,
+    args: &[&str],
+) -> ToolOutcome {
     let mut cmd = tokio::process::Command::new(program);
-    cmd.args(args).current_dir(dir)
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+    cmd.args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
     let out = match tokio::time::timeout(ctx.shell_timeout, cmd.output()).await {
         Ok(Ok(o)) => o,
@@ -46,22 +54,32 @@ async fn run_cmd(ctx: &ToolCtx, dir: &std::path::Path, program: &str, args: &[&s
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let mut body = String::new();
-    if !stdout.trim().is_empty() { body.push_str(&stdout); }
+    if !stdout.trim().is_empty() {
+        body.push_str(&stdout);
+    }
     if !stderr.trim().is_empty() {
-        if !body.is_empty() { body.push('\n'); }
+        if !body.is_empty() {
+            body.push('\n');
+        }
         body.push_str("stderr:\n");
         body.push_str(&stderr);
     }
-    if body.trim().is_empty() { body = "(no output)".into(); }
+    if body.trim().is_empty() {
+        body = "(no output)".into();
+    }
     // Pull a one-line summary out of cargo/pytest output so the model doesn't
     // have to scan the whole log.
     let mut summary = String::new();
     for line in body.lines() {
         let t = line.trim();
         if t.starts_with("test result:") || t.starts_with("FAILED") && t.contains("::") {
-            if !summary.is_empty() { summary.push_str("; "); }
+            if !summary.is_empty() {
+                summary.push_str("; ");
+            }
             summary.push_str(t);
-            if summary.len() > 400 { break; }
+            if summary.len() > 400 {
+                break;
+            }
         }
     }
     if !summary.is_empty() {
@@ -69,7 +87,11 @@ async fn run_cmd(ctx: &ToolCtx, dir: &std::path::Path, program: &str, args: &[&s
         body.push_str(&summary);
     }
     let body = truncate_output(&body, ctx.max_output_bytes);
-    if out.status.success() { ToolOutcome::ok(body) } else { ToolOutcome::err(body) }
+    if out.status.success() {
+        ToolOutcome::ok(body)
+    } else {
+        ToolOutcome::err(body)
+    }
 }
 
 pub struct RunTests;
@@ -94,7 +116,9 @@ impl Tool for RunTests {
             Some(Project::Go) => run_cmd(ctx, &dir, "go", &["test", "./..."]).await,
             Some(Project::Npm) => run_cmd(ctx, &dir, "npm", &["test"]).await,
             Some(Project::Pytest) => run_cmd(ctx, &dir, "pytest", &["-q"]).await,
-            None => ToolOutcome::err("no recognized project (Cargo.toml, package.json, go.mod, or pytest files)"),
+            None => ToolOutcome::err(
+                "no recognized project (Cargo.toml, package.json, go.mod, or pytest files)",
+            ),
         }
     }
 }
@@ -120,7 +144,9 @@ impl Tool for Build {
             Some(Project::Cargo) => run_cmd(ctx, &dir, "cargo", &["build"]).await,
             Some(Project::Go) => run_cmd(ctx, &dir, "go", &["build", "./..."]).await,
             Some(Project::Npm) => run_cmd(ctx, &dir, "npm", &["run", "build"]).await,
-            Some(Project::Pytest) => ToolOutcome::err("python projects have no standard build step"),
+            Some(Project::Pytest) => {
+                ToolOutcome::err("python projects have no standard build step")
+            }
             None => ToolOutcome::err("no recognized project"),
         }
     }
@@ -134,13 +160,21 @@ mod tests {
     use std::process::Command;
 
     fn cargo_available() -> bool {
-        Command::new("cargo").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+        Command::new("cargo")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     #[tokio::test]
     async fn run_tests_on_this_repo() {
-        if !cargo_available() { return; }
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        if !cargo_available() {
+            return;
+        }
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
         let root = root.canonicalize().unwrap();
         let ctx = ToolCtx::new(&root, &ToolsConfig::default()).unwrap();
         let out = RunTests.run(&json!({"cwd":"."}), &ctx).await;
@@ -150,8 +184,12 @@ mod tests {
 
     #[tokio::test]
     async fn build_on_this_repo() {
-        if !cargo_available() { return; }
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        if !cargo_available() {
+            return;
+        }
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
         let root = root.canonicalize().unwrap();
         let ctx = ToolCtx::new(&root, &ToolsConfig::default()).unwrap();
         let out = Build.run(&json!({"cwd":"."}), &ctx).await;

@@ -103,8 +103,9 @@ pub fn build(
 ) -> Result<Arc<dyn Provider>, ProviderError> {
     use kiln_core::config::Protocol;
     match cfg.protocol {
-        Protocol::OpenAiCompatible => openai::OpenAiCompat::new(id, cfg)
-            .map(|p| Arc::new(p) as Arc<dyn Provider>),
+        Protocol::OpenAiCompatible => {
+            openai::OpenAiCompat::new(id, cfg).map(|p| Arc::new(p) as Arc<dyn Provider>)
+        }
         Protocol::Anthropic => {
             anthropic::Anthropic::new(id, cfg).map(|p| Arc::new(p) as Arc<dyn Provider>)
         }

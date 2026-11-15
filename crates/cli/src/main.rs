@@ -177,7 +177,11 @@ fn run_cli(cli: &Cli, runtime: &tokio::runtime::Runtime) -> Result<std::process:
     }
 }
 
-async fn build_agent(cwd: &Path, model: Option<&str>, task: Option<&str>) -> Result<(Agent, Vec<String>)> {
+async fn build_agent(
+    cwd: &Path,
+    model: Option<&str>,
+    task: Option<&str>,
+) -> Result<(Agent, Vec<String>)> {
     let config = Config::load(cwd)?;
     if config.providers.is_empty() {
         bail!(
@@ -230,7 +234,10 @@ fn one_shot(
             if verbose {
                 eprintln!(
                     "[kiln] {} steps, {} input tokens, {} output tokens, ${:.4}",
-                    outcome.steps, outcome.usage.input_tokens, outcome.usage.output_tokens, outcome.cost_usd
+                    outcome.steps,
+                    outcome.usage.input_tokens,
+                    outcome.usage.output_tokens,
+                    outcome.cost_usd
                 );
             }
             Ok(std::process::ExitCode::SUCCESS)
@@ -435,7 +442,10 @@ fn doctor_command(cwd: &Path, runtime: &tokio::runtime::Runtime) -> Result<std::
             if let Some(problem) = &check.problem {
                 println!("  status    ok, but: {problem}");
             } else {
-                println!("  status    ok ({} models, {} ms)", check.model_count, check.latency_ms);
+                println!(
+                    "  status    ok ({} models, {} ms)",
+                    check.model_count, check.latency_ms
+                );
             }
             if !check.models.is_empty() {
                 println!("  sample    {}", check.models.join(", "));
@@ -455,7 +465,9 @@ fn doctor_command(cwd: &Path, runtime: &tokio::runtime::Runtime) -> Result<std::
         "{} of {} providers ready; {} of {} logical models have a usable target.",
         report.usable_providers,
         report.checks.len(),
-        report.logical_models.saturating_sub(report.broken_logical_models.len()),
+        report
+            .logical_models
+            .saturating_sub(report.broken_logical_models.len()),
         report.logical_models
     );
     for name in &report.broken_logical_models {

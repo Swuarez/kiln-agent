@@ -3,8 +3,8 @@
 //! before a task starts, rather than discovering a 404 mid-loop.
 
 use crate::build;
-use kiln_core::Config;
 use kiln_core::config::ProviderConfig;
+use kiln_core::Config;
 use std::collections::BTreeSet;
 use std::time::Instant;
 
@@ -49,11 +49,7 @@ pub async fn run(cfg: &Config) -> Report {
 
     let mut broken = Vec::new();
     for (name, model) in &cfg.models {
-        if !model
-            .targets
-            .iter()
-            .any(|t| usable.contains(&t.provider))
-        {
+        if !model.targets.iter().any(|t| usable.contains(&t.provider)) {
             broken.push(name.clone());
         }
     }
