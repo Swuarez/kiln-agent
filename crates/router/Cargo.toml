@@ -1,0 +1,12 @@
+[package]
+name = "kiln-router"
+description = "Logical model routing with health and quota awareness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kiln-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

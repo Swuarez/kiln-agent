@@ -1,0 +1,16 @@
+[package]
+name = "kiln-tools"
+description = "Filesystem, search and shell tools with workspace confinement"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+kiln-core.workspace = true
+async-trait.workspace = true
+ignore.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true

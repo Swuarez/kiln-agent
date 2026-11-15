@@ -1,0 +1,40 @@
+# --- build output ---
+/target/
+**/target/
+*.pdb
+*.tmp
+*.orig
+*.rej
+
+# --- Kiln runtime state: sessions, project config, anything with credentials ---
+.kiln/
+**/.kiln/
+
+# --- secrets / local environment (must never be committed) ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+*credentials*.json
+*.local.toml
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- editors ---
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# --- logs and coverage ---
+*.log
+coverage/
+*.profraw
