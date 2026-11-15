@@ -167,33 +167,69 @@ mod tests {
             .unwrap_or(false)
     }
 
-    #[tokio::test]
-    async fn run_tests_on_this_repo() {
-        if !cargo_available() {
-            return;
-        }
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..");
-        let root = root.canonicalize().unwrap();
-        let ctx = ToolCtx::new(&root, &ToolsConfig::default()).unwrap();
-        let out = RunTests.run(&json!({"cwd":"."}), &ctx).await;
-        assert!(!out.is_error, "{}", out.content);
-        assert!(out.content.contains("test result:"), "{}", out.content);
+    /// Builds a throwaway Cargo package in the temp dir. Never point these tests
+    /// at Kiln's own workspace: `cargo test` there would re-enter the suite and
+    /// recurse until the runner dies.
+    fn cargo_fixture(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("kiln-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"kiln_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }\n\
+             #[cfg(test)]\nmod tests {\n    #[test]\n    fn adds() { assert_eq!(super::add(1, 2), 3); }\n}\n",
+        )
+        .unwrap();
+        dir
     }
 
     #[tokio::test]
-    async fn build_on_this_repo() {
+    async fn run_tests_and_build_on_a_cargo_fixture() {
         if !cargo_available() {
             return;
         }
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..");
-        let root = root.canonicalize().unwrap();
-        let ctx = ToolCtx::new(&root, &ToolsConfig::default()).unwrap();
-        let out = Build.run(&json!({"cwd":"."}), &ctx).await;
-        assert!(!out.is_error, "{}", out.content);
+        let dir = cargo_fixture("cargo");
+        let ctx = ToolCtx::new(&dir, &ToolsConfig::default()).unwrap();
+
+        let tests = RunTests.run(&json!({"cwd":"."}), &ctx).await;
+        assert!(!tests.is_error, "{}", tests.content);
+        assert!(tests.content.contains("test result:"), "{}", tests.content);
+        assert!(tests.content.contains("1 passed"), "{}", tests.content);
+
+        let build = Build.run(&json!({"cwd":"."}), &ctx).await;
+        assert!(!build.is_error, "{}", build.content);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detect_finds_each_project_kind() {
+        let dir = std::env::temp_dir().join(format!("kiln-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(detect(&dir).is_none());
+
+        std::fs::write(dir.join("Cargo.toml"), "").unwrap();
+        assert!(matches!(detect(&dir), Some(Project::Cargo)));
+        std::fs::remove_file(dir.join("Cargo.toml")).unwrap();
+
+        std::fs::write(dir.join("go.mod"), "").unwrap();
+        assert!(matches!(detect(&dir), Some(Project::Go)));
+        std::fs::remove_file(dir.join("go.mod")).unwrap();
+
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        assert!(matches!(detect(&dir), Some(Project::Npm)));
+        std::fs::remove_file(dir.join("package.json")).unwrap();
+
+        std::fs::write(dir.join("pyproject.toml"), "").unwrap();
+        assert!(matches!(detect(&dir), Some(Project::Pytest)));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
