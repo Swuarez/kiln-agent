@@ -227,6 +227,15 @@ async fn build_agent(
     );
     agent.prompt_context.skills = skills.catalogue();
     agent.prompt_context.commands = commands.catalogue();
+
+    if !agent.config.agent.subagents.enabled {
+        return Ok((agent, warnings));
+    }
+
+    // Snapshot the agent's parts rather than holding a reference to it, so
+    // `delegate` does not create an ownership cycle.
+    let delegate = kiln_agent::subagent::Delegate::new(&agent);
+    agent.tools = Arc::new(agent.tools.with_tool(Arc::new(delegate)));
     Ok((agent, warnings))
 }
 

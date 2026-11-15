@@ -5,6 +5,7 @@
 
 pub mod context;
 pub mod prompt;
+pub mod subagent;
 
 use async_trait::async_trait;
 use kiln_core::config::Config;
@@ -141,7 +142,22 @@ impl Agent {
         session: &mut Session,
         task: &str,
         approver: &dyn Approver,
-        on_event: &mut dyn FnMut(AgentEvent),
+        on_event: &mut (dyn FnMut(AgentEvent) + Send),
+    ) -> Result<RunOutcome> {
+        let budget = self.config.agent.max_steps;
+        self.run_with_budget(session, task, approver, budget, on_event)
+            .await
+    }
+
+    /// Same loop with an explicit step budget. Sub-agents use this to get a
+    /// tighter bound than the parent's.
+    pub async fn run_with_budget(
+        &self,
+        session: &mut Session,
+        task: &str,
+        approver: &dyn Approver,
+        max_steps: usize,
+        on_event: &mut (dyn FnMut(AgentEvent) + Send),
     ) -> Result<RunOutcome> {
         if session.title == "untitled" {
             session.title = task
@@ -157,8 +173,9 @@ impl Agent {
         let mut usage = Usage::default();
         let mut cost_usd = 0.0_f64;
         let mut last_text = String::new();
+        let max_steps = max_steps.max(1);
 
-        for step in 0..self.config.agent.max_steps {
+        for step in 0..max_steps {
             let fitted = context::fit(&session.messages, self.config.agent.context_budget_tokens);
             let response = match self.complete(&fitted, &mut *on_event).await {
                 Ok((r, c)) => {
@@ -208,8 +225,7 @@ impl Agent {
         self.router.persist();
         session.save(&self.sessions_dir)?;
         Err(Error::Other(format!(
-            "stopped after {} steps without finishing. The session is saved at {}.\nLast model message: {}",
-            self.config.agent.max_steps,
+            "stopped after {max_steps} steps without finishing. The session is saved at {}.\nLast model message: {}",
             session.path(&self.sessions_dir).display(),
             last_text.chars().take(400).collect::<String>()
         )))
@@ -219,7 +235,7 @@ impl Agent {
     async fn complete(
         &self,
         messages: &[Message],
-        on_event: &mut dyn FnMut(AgentEvent),
+        on_event: &mut (dyn FnMut(AgentEvent) + Send),
     ) -> Result<(ChatResponse, f64)> {
         let targets = self.router.order(&self.model)?;
         let schemas: Vec<ToolSchema> = self
@@ -304,7 +320,7 @@ impl Agent {
         &self,
         call: &ToolCall,
         approver: &dyn Approver,
-        on_event: &mut dyn FnMut(AgentEvent),
+        on_event: &mut (dyn FnMut(AgentEvent) + Send),
     ) -> (String, bool) {
         let Some(tool) = self.tools.get(&call.name) else {
             let available = self.tools.names().join(", ");

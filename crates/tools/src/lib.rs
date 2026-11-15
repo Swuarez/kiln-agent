@@ -129,6 +129,45 @@ impl ToolRegistry {
     pub fn names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
+
+    /// A copy with one more tool. The registry itself is cheap to clone; the
+    /// tools are shared behind `Arc`.
+    pub fn with_tool(&self, tool: Arc<dyn Tool>) -> Self {
+        Self {
+            tools: self
+                .tools
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .chain(std::iter::once((tool.spec().name, tool)))
+                .collect(),
+        }
+    }
+
+    /// A registry limited to `allowed`. Unknown names are ignored rather than
+    /// rejected so a config that names a tool this build lacks still starts.
+    pub fn subset(&self, allowed: &[String]) -> Self {
+        Self {
+            tools: self
+                .tools
+                .iter()
+                .filter(|(name, _)| allowed.iter().any(|a| a == *name))
+                .map(|(name, tool)| (name.clone(), tool.clone()))
+                .collect(),
+        }
+    }
+
+    /// Same tools, minus the given names. Used to stop sub-agents from
+    /// delegating again.
+    pub fn without(&self, excluded: &[String]) -> Self {
+        Self {
+            tools: self
+                .tools
+                .iter()
+                .filter(|(name, _)| !excluded.iter().any(|e| e == *name))
+                .map(|(name, tool)| (name.clone(), tool.clone()))
+                .collect(),
+        }
+    }
 }
 
 /// Resolves a user/model supplied path and proves it stays inside `root`.

@@ -130,6 +130,8 @@ pub struct AgentConfig {
     pub context_budget_tokens: usize,
     #[serde(default = "default_temperature")]
     pub temperature: f32,
+    #[serde(default)]
+    pub subagents: SubagentConfig,
 }
 
 fn default_max_steps() -> usize {
@@ -144,12 +146,70 @@ fn default_temperature() -> f32 {
     0.2
 }
 
+/// Controls the `delegate` tool. Sub-agents exist to keep a large investigation
+/// out of the parent's context, so they are read-only unless told otherwise.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubagentConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Upper bound on sub-agents running at once.
+    #[serde(default = "default_subagent_concurrency")]
+    pub max_concurrency: usize,
+    /// Steps each sub-agent may take before it is stopped.
+    #[serde(default = "default_subagent_steps")]
+    pub max_steps: usize,
+    /// Cap on the summary returned to the parent, in characters.
+    #[serde(default = "default_subagent_summary")]
+    pub max_summary_chars: usize,
+    /// Logical model for sub-agents. Empty means inherit the parent's.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    /// `readonly` by default: an explorer should not edit the repo.
+    #[serde(default = "default_subagent_mode")]
+    pub mode: Mode,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_subagent_concurrency() -> usize {
+    4
+}
+
+fn default_subagent_steps() -> usize {
+    20
+}
+
+fn default_subagent_summary() -> usize {
+    4_000
+}
+
+fn default_subagent_mode() -> Mode {
+    Mode::Readonly
+}
+
+impl Default for SubagentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_concurrency: default_subagent_concurrency(),
+            max_steps: default_subagent_steps(),
+            max_summary_chars: default_subagent_summary(),
+            model: String::new(),
+            mode: default_subagent_mode(),
+        }
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_steps: default_max_steps(),
             context_budget_tokens: default_context_budget(),
             temperature: default_temperature(),
+            subagents: SubagentConfig::default(),
         }
     }
 }
@@ -482,6 +542,14 @@ mode = "ask"   # ask | allow | readonly
 max_steps = 40
 context_budget_tokens = 60000
 temperature = 0.2
+
+# Sub-agents keep large investigations out of the main context.
+[agent.subagents]
+enabled = true
+max_concurrency = 4     # sub-agents running at once
+max_steps = 20          # per sub-agent
+max_summary_chars = 4000
+mode = "readonly"       # readonly | ask | allow
 
 [tools]
 shell_timeout_secs = 120
