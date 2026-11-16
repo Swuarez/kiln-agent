@@ -11,14 +11,14 @@ weeks of evenings, **L** is a month or more.
 | # | Milestone | Theme | Size | Status |
 |---|-----------|-------|------|--------|
 | 1 | Trust the wire | make v0.1 survive real providers | S | partial |
-| 2 | Verify loop | tests, builds and git as first-class tools | M | planned |
+| 2 | Verify loop | tests, builds and git as first-class tools | M | partial |
 | 3 | Streaming + TUI | usable for long interactive sessions | M | planned |
-| 4 | Durability | resume, cost accounting, persisted health | M | planned |
+| 4 | Durability | resume, cost accounting, persisted health | M | partial |
 | 5 | Repo intelligence | symbol search on large repos | L | planned |
 | 6 | MCP | external tool servers | M | partial |
-| 7 | Skills | Claude Code `SKILL.md` compatibility | S | planned |
-| 8 | Sub-agents | delegation with real isolation | L | planned |
-| 9 | Memory | facts that survive sessions | M | planned |
+| 7 | Skills | Claude Code `SKILL.md` compatibility | S | done |
+| 8 | Sub-agents | delegation with real isolation | L | partial |
+| 9 | Memory | facts that survive sessions | M | in progress |
 | 10 | Plugins | process-isolated extensions | L | planned |
 | 11 | Packaging | binaries people can install | M | planned |
 
